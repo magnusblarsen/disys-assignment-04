@@ -1,6 +1,5 @@
 package main
 
-//protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/template.proto
 import (
 	"bufio"
 	"context"
@@ -10,8 +9,15 @@ import (
 	"os"
 	"strconv"
 
-	ping "github.com/magnusblarsen/disys-assignment-04/grpc"
+	MutexService "github.com/magnusblarsen/disys-assignment-04/grpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+const (
+	WANTED   = 0
+	RELEASED = 1
+	HELD     = 2
 )
 
 func main() {
@@ -22,10 +28,10 @@ func main() {
 	defer cancel()
 
 	p := &peer{
-		id:            ownPort,
-		amountOfPings: make(map[int32]int32),
-		clients:       make(map[int32]ping.PingClient),
-		ctx:           ctx,
+		id:      ownPort,
+		clients: make(map[int32]MutexService.MutexServiceClient),
+		ctx:     ctx,
+		state:   RELEASED,
 	}
 
 	// Create listener tcp on port ownPort
@@ -34,7 +40,7 @@ func main() {
 		log.Fatalf("Failed to listen on port: %v", err)
 	}
 	grpcServer := grpc.NewServer()
-	ping.RegisterPingServer(grpcServer, p)
+	MutexService.RegisterMutexServiceServer(grpcServer, p)
 
 	go func() {
 		if err := grpcServer.Serve(list); err != nil {
@@ -51,44 +57,64 @@ func main() {
 
 		var conn *grpc.ClientConn
 		fmt.Printf("Trying to dial: %v\n", port)
-		conn, err := grpc.Dial(fmt.Sprintf(":%v", port), grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.Dial(fmt.Sprintf(":%v", port), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 		if err != nil {
 			log.Fatalf("Could not connect: %s", err)
 		}
 		defer conn.Close()
-		c := ping.NewPingClient(conn)
+		c := MutexService.NewMutexServiceClient(conn)
 		p.clients[port] = c
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		p.sendPingToAll()
+		text := scanner.Text()
+		if text == "enter" {
+			p.AttemptAccess()
+		}
+		if text == "e" {
+			p.Exit()
+		}
 	}
 }
 
 type peer struct {
-	ping.UnimplementedPingServer
-	id            int32
-	amountOfPings map[int32]int32
-	clients       map[int32]ping.PingClient
-	ctx           context.Context
+	MutexService.UnimplementedMutexServiceServer
+	id           int32
+	clients      map[int32]MutexService.MutexServiceClient
+	ctx          context.Context
+	state        int
+	requestQueue []chan bool
 }
 
-func (p *peer) Ping(ctx context.Context, req *ping.Request) (*ping.Reply, error) {
-	id := req.Id
-	p.amountOfPings[id] += 1
-
-	rep := &ping.Reply{Amount: p.amountOfPings[id]}
-	return rep, nil
+func (p *peer) RequestAccess(ctx context.Context, req *MutexService.Request) (*MutexService.Reply, error) {
+	if p.state == HELD || (p.state == WANTED && p.id < req.Id) {
+		requestChan := make(chan bool)
+		p.requestQueue = append(p.requestQueue, requestChan)
+		<-requestChan
+	}
+	return &MutexService.Reply{Answer: true}, nil
 }
 
-func (p *peer) sendPingToAll() {
-	request := &ping.Request{Id: p.id}
+func (p *peer) AttemptAccess() {
+	p.state = WANTED
+
+	request := &MutexService.Request{Id: p.id}
 	for id, client := range p.clients {
-		reply, err := client.Ping(p.ctx, request)
+		reply, err := client.RequestAccess(p.ctx, request)
 		if err != nil {
 			fmt.Println("something went wrong")
 		}
-		fmt.Printf("Got reply from id %v: %v\n", id, reply.Amount)
+		fmt.Printf("Got reply from id %v: %v\n", id, reply.Answer)
 	}
+	p.state = HELD
+	fmt.Printf("Got Access")
+}
+
+func (p *peer) Exit() {
+	p.state = RELEASED
+	for _, request := range p.requestQueue {
+		request <- true
+	}
+	p.requestQueue = make([]chan bool, 0)
 }

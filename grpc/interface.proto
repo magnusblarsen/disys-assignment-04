@@ -1,11 +1,10 @@
 syntax = "proto3";
+package mutex;
+option go_package = "https://github.com/magnusblarsen/disys-assignment-04;mutex";
 
-package ping;
-option go_package = "https://github.com/magnusblarsen/disys-assignment-04;ping";
 
-
-service Ping {
-    rpc ping (Request) returns (Reply) {}
+service MutexService {
+    rpc RequestAccess (Request) returns (Reply) {}
 }
 
 message Request {
@@ -13,5 +12,5 @@ message Request {
 }
 
 message Reply {
-    int32 amount = 1;
+    bool answer = 1;
 }

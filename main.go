@@ -22,7 +22,7 @@ const (
 
 func main() {
 	arg1, _ := strconv.ParseInt(os.Args[1], 10, 32)
-	ownPort := int32(arg1) + 5000
+	ownPort := int32(arg1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -48,31 +48,44 @@ func main() {
 		}
 	}()
 
-	for i := 0; i < 3; i++ {
-		port := int32(5000) + int32(i)
 
-		if port == ownPort {
+    	
+    file, err := os.Open("port-addresses.txt")
+    defer file.Close()
+    if err != nil {
+        log.Printf("could not read text file with ports: %v", err)
+    }
+    fileScanner := bufio.NewScanner(file)
+
+
+	for fileScanner.Scan() {
+		port, _ := strconv.ParseInt(fileScanner.Text(), 10, 32)
+        port32 := int32(port)
+
+		if port32 == ownPort {
 			continue
 		}
 
 		var conn *grpc.ClientConn
-		fmt.Printf("Trying to dial: %v\n", port)
+		log.Printf("Trying to dial: %v\n", port)
 		conn, err := grpc.Dial(fmt.Sprintf(":%v", port), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 		if err != nil {
-			log.Fatalf("Could not connect: %s", err)
+			log.Fatalf("Could not connect: %v", err)
 		}
 		defer conn.Close()
 		c := MutexService.NewMutexServiceClient(conn)
-		p.clients[port] = c
+		p.clients[port32] = c
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		text := scanner.Text()
-		if text == "enter" {
+		if p.state == RELEASED && text == "enter" {
+            log.Printf("Process with id %v is trying to get access\n", p.id)
 			p.AttemptAccess()
 		}
-		if text == "e" {
+		if p.state == HELD && text == "exit" {
+            log.Printf("Process with id %v is trying to exit\n", p.id)
 			p.Exit()
 		}
 	}
@@ -103,12 +116,12 @@ func (p *peer) AttemptAccess() {
 	for id, client := range p.clients {
 		reply, err := client.RequestAccess(p.ctx, request)
 		if err != nil {
-			fmt.Println("something went wrong")
+            log.Printf("something went wrong: %v", err)
 		}
-		fmt.Printf("Got reply from id %v: %v\n", id, reply.Answer)
+		log.Printf("Got reply from id %v: %v\n", id, reply.Answer)
 	}
 	p.state = HELD
-	fmt.Printf("Got Access")
+    log.Printf("process with id: %v now has access to the critical section", p.id)
 }
 
 func (p *peer) Exit() {

@@ -78,7 +78,7 @@ func main() {
 		}
 
 		var conn *grpc.ClientConn
-		log.Printf("Trying to dial: %v\n", port)
+		log.Printf("id %v is trying to dial: %v\n",p.id, port)
 		conn, err := grpc.Dial(fmt.Sprintf(":%v", port), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 		if err != nil {
 			log.Fatalf("Could not connect: %v", err)

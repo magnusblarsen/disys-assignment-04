@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -21,6 +22,16 @@ const (
 )
 
 func main() {
+	file, err := os.OpenFile("ourLog", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+	defer file.Close()
+
+	multiWriter := io.MultiWriter(os.Stdout, file)
+	log.SetOutput(multiWriter)
+
+
 	arg1, _ := strconv.ParseInt(os.Args[1], 10, 32)
 	ownPort := int32(arg1)
 
@@ -50,12 +61,12 @@ func main() {
 
 
     	
-    file, err := os.Open("port-addresses.txt")
+    portfile, err := os.Open("port-addresses.txt")
     defer file.Close()
     if err != nil {
         log.Printf("could not read text file with ports: %v", err)
     }
-    fileScanner := bufio.NewScanner(file)
+    fileScanner := bufio.NewScanner(portfile)
 
 
 	for fileScanner.Scan() {
